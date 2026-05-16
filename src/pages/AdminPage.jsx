@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { autoReturnStale } from '../hooks/useRentals'
@@ -180,14 +180,74 @@ function EquipmentManager() {
 }
 
 // ────────────────────────────────────────────────────────────
+// CSV 파싱 유틸 (따옴표로 묶인 콤마 처리)
+// ────────────────────────────────────────────────────────────
+function parseCSVLine(line) {
+  const result = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') { inQuotes = !inQuotes }
+    else if (ch === ',' && !inQuotes) { result.push(current); current = '' }
+    else { current += ch }
+  }
+  result.push(current)
+  return result
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/)
+  const headers = parseCSVLine(lines[0]).map((h) => h.trim())
+
+  const idx = (keywords) => headers.findIndex((h) => keywords.some((k) => h.includes(k)))
+  const nameIdx   = idx(['성함', '이름', 'name'])
+  const genIdx    = idx(['기수', 'generation'])
+  const sidIdx    = idx(['학번', 'student_id'])
+  const deptIdx   = idx(['학과', 'department'])
+  const contIdx   = idx(['휴대폰', '연락처', '전화', 'contact'])
+  const genderIdx = idx(['성별', 'gender'])
+  const birthIdx  = idx(['나이', '년생', 'birth'])
+  const camIdx    = idx(['카메라 보유', '카메라보유', 'camera'])
+
+  return lines.slice(1)
+    .map((line) => parseCSVLine(line))
+    .map((cols) => {
+      const camRaw = camIdx >= 0 ? cols[camIdx]?.trim() : ''
+      const hasCamera = !!camRaw && camRaw !== '없음'
+      const genRaw = cols[genIdx]?.trim() || ''
+
+      const row = {
+        name:       cols[nameIdx]?.trim() || '',
+        generation: parseInt(genRaw.replace(/[^0-9]/g, ''), 10) || null,
+        student_id: cols[sidIdx]?.trim() || null,
+        department: cols[deptIdx]?.trim() || null,
+        contact:    cols[contIdx]?.trim() || null,
+      }
+      if (genderIdx >= 0) row.gender      = cols[genderIdx]?.trim() || null
+      if (birthIdx  >= 0) row.birth_year  = cols[birthIdx]?.trim()  || null
+      if (camIdx    >= 0) {
+        row.has_camera   = hasCamera
+        row.camera_model = hasCamera ? camRaw : null
+      }
+      return row
+    })
+    .filter((r) => r.name)
+}
+
+// ────────────────────────────────────────────────────────────
 // 회원 목록 탭
 // ────────────────────────────────────────────────────────────
 function MemberManager() {
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [csvRows, setCsvRows] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const fileInputRef = useRef(null)
 
-  useEffect(() => {
+  const loadMembers = useCallback(() => {
     supabase
       .from('members')
       .select('id, name, generation, department, contact, student_id')
@@ -196,23 +256,106 @@ function MemberManager() {
       .then(({ data }) => { setMembers(data || []); setLoading(false) })
   }, [])
 
+  useEffect(() => { loadMembers() }, [loadMembers])
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setCsvRows(parseCSV(ev.target.result))
+      setImportResult(null)
+    }
+    reader.readAsText(file, 'utf-8')
+    e.target.value = ''
+  }
+
+  const handleImport = async () => {
+    if (!csvRows?.length) return
+    setImporting(true)
+    const { error, count } = await supabase
+      .from('members')
+      .upsert(csvRows, { onConflict: 'name,generation,student_id', ignoreDuplicates: true, count: 'exact' })
+    setImporting(false)
+    if (error) {
+      setImportResult({ error: error.message })
+    } else {
+      setImportResult({ total: csvRows.length, added: count ?? '?' })
+      setCsvRows(null)
+      loadMembers()
+    }
+  }
+
   const filtered = query.trim()
     ? members.filter((m) => m.name.includes(query) || String(m.generation).includes(query))
     : members
+
+  const inputStyle = { width: '100%', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '9px 12px', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }
 
   if (loading) return <p style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>불러오는 중...</p>
 
   return (
     <div>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
+      {/* 검색 + CSV 업로드 */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: '8px' }}>
         <input
           type="text"
           placeholder="이름 또는 기수 검색"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '9px 12px', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }}
+          style={{ ...inputStyle, flex: 1, width: 'auto' }}
         />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{ padding: '9px 14px', borderRadius: '10px', border: '1.5px dashed #d1d5db', backgroundColor: '#f9fafb', color: '#6b7280', fontSize: '13px', fontWeight: '500', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+        >
+          CSV 불러오기
+        </button>
+        <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFileChange} />
       </div>
+
+      {/* CSV 미리보기 */}
+      {csvRows && (
+        <div style={{ margin: '12px 16px', borderRadius: '12px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px', backgroundColor: '#f0fdf4', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <p style={{ fontSize: '13px', fontWeight: '600', color: '#166534', margin: 0 }}>CSV 미리보기 — {csvRows.length}명</p>
+            <button onClick={() => setCsvRows(null)} style={{ fontSize: '12px', color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+          </div>
+          <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+            {csvRows.map((r, i) => (
+              <div key={i} style={{ padding: '9px 14px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <p style={{ fontSize: '13px', fontWeight: '500', color: '#111827', margin: '0 0 1px' }}>{r.name}</p>
+                  <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>{r.generation}기 · {r.department}</p>
+                </div>
+                <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>{r.contact}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '10px 14px', backgroundColor: '#f9fafb', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button onClick={() => setCsvRows(null)} style={{ padding: '7px 14px', borderRadius: '8px', border: '1px solid #e5e7eb', backgroundColor: '#fff', fontSize: '13px', cursor: 'pointer' }}>취소</button>
+            <button
+              onClick={handleImport}
+              disabled={importing}
+              style={{ padding: '7px 16px', borderRadius: '8px', border: 'none', backgroundColor: '#111827', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
+            >
+              {importing ? '업로드 중...' : '업로드'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 업로드 결과 */}
+      {importResult && (
+        <div style={{ margin: '0 16px 12px', padding: '10px 14px', borderRadius: '10px', backgroundColor: importResult.error ? '#fef2f2' : '#f0fdf4', border: `1px solid ${importResult.error ? '#fecaca' : '#bbf7d0'}` }}>
+          <p style={{ fontSize: '13px', color: importResult.error ? '#991b1b' : '#166534', margin: 0 }}>
+            {importResult.error
+              ? `오류: ${importResult.error}`
+              : `완료 — ${importResult.total}명 중 ${importResult.added}명 추가됨 (중복 제외)`}
+          </p>
+        </div>
+      )}
+
       <div style={{ padding: '8px 16px', backgroundColor: '#f9fafb', borderBottom: '1px solid #f3f4f6' }}>
         <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>총 {filtered.length}명</p>
       </div>
