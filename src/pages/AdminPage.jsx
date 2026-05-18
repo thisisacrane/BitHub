@@ -273,14 +273,15 @@ function MemberManager() {
   const handleImport = async () => {
     if (!csvRows?.length) return
     setImporting(true)
-    const { error, count } = await supabase
+    const { data, error } = await supabase
       .from('members')
-      .upsert(csvRows, { onConflict: 'name,generation,student_id', ignoreDuplicates: true, count: 'exact' })
+      .upsert(csvRows, { onConflict: 'name,generation,student_id', ignoreDuplicates: true })
+      .select('id')
     setImporting(false)
     if (error) {
       setImportResult({ error: error.message })
     } else {
-      setImportResult({ total: csvRows.length, added: count ?? '?' })
+      setImportResult({ total: csvRows.length, added: data?.length ?? 0 })
       setCsvRows(null)
       loadMembers()
     }
