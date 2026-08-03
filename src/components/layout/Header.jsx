@@ -45,7 +45,7 @@ export default function Header() {
             navigate('/', { state: { resetToToday: true } })
           }}
         >
-          Bithub
+          BitHub
         </span>
         <button
           onClick={handleLockClick}

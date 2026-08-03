@@ -24,7 +24,7 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'Bithub',
+        name: 'BitHub',
         short_name: '빛담',
         description: '빛담 카메라 대여 시스템',
         theme_color: '#1a1a2e',

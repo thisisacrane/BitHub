@@ -153,7 +153,7 @@ function DesktopSidebar() {
           }}
           style={{ padding: '32px 24px 24px', borderBottom: '1px solid #f0ece5', cursor: 'pointer' }}
         >
-          <p style={{ fontSize: '22px', fontWeight: '800', color: '#111827', letterSpacing: '-0.5px', lineHeight: 1 }}>Bithub</p>
+          <p style={{ fontSize: '22px', fontWeight: '800', color: '#111827', letterSpacing: '-0.5px', lineHeight: 1 }}>BitHub</p>
           <p style={{ fontSize: '11px', color: '#b8b0a6', marginTop: '6px', letterSpacing: '0.03em' }}>빛담 장비 대여 시스템</p>
         </div>
 

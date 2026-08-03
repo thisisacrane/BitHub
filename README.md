@@ -1,4 +1,4 @@
-# Bithub — 빛담 장비 대여 시스템
+# BitHub — 빛담 장비 대여 시스템
 
 한양대학교 공과대학 사진동아리 **빛담**의 카메라/삼각대 대여 관리 웹 애플리케이션입니다.
 
@@ -64,8 +64,8 @@ src/
 ### 1. 저장소 클론
 
 ```bash
-git clone https://github.com/thisisacrane/Bithub.git
-cd Bithub/bithub
+git clone https://github.com/thisisacrane/BitHub.git
+cd BitHub/bithub
 npm install
 ```
 
