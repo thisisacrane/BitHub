@@ -24,6 +24,7 @@ export default function RentalForm({ equipment, existingRentals = [], selectedDa
 
   const [manualMode, setManualMode] = useState(false)
   const [tripods, setTripods] = useState([])
+  const [tripodRentals, setTripodRentals] = useState([])
   const [form, setForm] = useState({
     member_id: null,
     borrower_name: '',
@@ -43,15 +44,23 @@ export default function RentalForm({ equipment, existingRentals = [], selectedDa
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  // 카메라 선택 시에만 삼각대 목록 불러오기
+  // 카메라 선택 시에만 삼각대 목록 + 활성 대여 목록을 따로 불러옴
+  // (equipments.current_rental_id는 연속된 날짜로 여러 건이 겹치면 최신 값만 가리켜서
+  //  날짜 충돌 판단에 못 씀 — rentals를 날짜 범위로 직접 대조)
   useEffect(() => {
     if (!isCamera) return
     supabase
       .from('equipments')
-      .select('id, name, status, current_rental:rentals!current_rental_id(borrower_name, borrower_generation, rental_date, due_date)')
+      .select('id, name, status')
       .eq('category', 'tripod')
       .order('name')
       .then(({ data }) => setTripods(data || []))
+    supabase
+      .from('rentals')
+      .select('tripod_id, rental_date, due_date, borrower_name, borrower_generation')
+      .not('tripod_id', 'is', null)
+      .in('status', ['rented', 'scheduled'])
+      .then(({ data }) => setTripodRentals(data || []))
   }, [isCamera])
 
   const setField = (key, value) =>
@@ -204,10 +213,11 @@ export default function RentalForm({ equipment, existingRentals = [], selectedDa
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {tripods.map((tri) => {
                   // 신규 rental_date가 기존 대여 기간(rental_date ~ due_date) 안에 있을 때만 비활성화
-                  const isRented = tri.status === 'rented'
-                    && (tri.current_rental?.rental_date ?? '') <= form.rental_date
-                    && (tri.current_rental?.due_date ?? '') > form.rental_date
-                  const isScheduled = isRented && (tri.current_rental?.rental_date ?? '') > today()
+                  const conflict = tripodRentals.find(
+                    (r) => r.tripod_id === tri.id && r.rental_date <= form.rental_date && r.due_date > form.rental_date
+                  )
+                  const isRented = !!conflict
+                  const isScheduled = isRented && conflict.rental_date > today()
                   const isSelected = form.tripod_id === tri.id
                   return (
                     <button
@@ -234,7 +244,7 @@ export default function RentalForm({ equipment, existingRentals = [], selectedDa
                         backgroundColor: isRented ? '#eff6ff' : isSelected ? '#111827' : '#f3f4f6',
                         color: isRented ? '#3b82f6' : isSelected ? '#fff' : '#6b7280',
                       }}>
-                        {isRented ? `${isScheduled ? '대여 예정' : '대여중'} (${tri.current_rental?.borrower_generation}기 ${tri.current_rental?.borrower_name})` : isSelected ? '선택됨' : '선택'}
+                        {isRented ? `${isScheduled ? '대여 예정' : '대여중'} (${conflict.borrower_generation}기 ${conflict.borrower_name})` : isSelected ? '선택됨' : '선택'}
                       </span>
                     </button>
                   )
